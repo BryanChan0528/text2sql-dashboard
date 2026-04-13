@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: text2sql-dashboard
+    runtime: python
+    buildCommand: pip install -r requirements.txt && python seed.py
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: DB_PATH
+        value: /data/deriv.db
+      - key: MAX_ROWS
+        value: "500"
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    healthCheckPath: /health

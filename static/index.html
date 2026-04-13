@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Text-to-SQL Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      grid-template-rows: 56px 1fr;
+    }
+
+    /* Header */
+    header {
+      grid-column: 1 / -1;
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3748;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 12px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; color: #fff; }
+    header .badge {
+      background: #ff444f;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 12px;
+      letter-spacing: 0.5px;
+    }
+
+    /* Sidebar */
+    aside {
+      background: #1a1d27;
+      border-right: 1px solid #2d3748;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    aside h2 { font-size: 12px; font-weight: 700; color: #718096; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+    .table-group { margin-bottom: 16px; }
+    .table-name {
+      font-size: 13px; font-weight: 600; color: #90cdf4;
+      cursor: pointer; display: flex; align-items: center; gap: 6px;
+    }
+    .table-name::before { content: '▶'; font-size: 9px; transition: transform .2s; }
+    .table-name.open::before { transform: rotate(90deg); }
+    .col-list { display: none; padding: 6px 0 0 16px; }
+    .col-list.open { display: block; }
+    .col-item { font-size: 12px; color: #a0aec0; padding: 2px 0; }
+    .col-type { color: #4a5568; margin-left: 4px; font-size: 11px; }
+
+    /* Main content */
+    main {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Query bar */
+    .query-bar {
+      padding: 20px 24px;
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3748;
+    }
+    .query-row {
+      display: flex;
+      gap: 10px;
+    }
+    #question {
+      flex: 1;
+      background: #0f1117;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 15px;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    #question:focus { border-color: #ff444f; }
+    #question::placeholder { color: #4a5568; }
+    #ask-btn {
+      background: #ff444f;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s;
+      white-space: nowrap;
+    }
+    #ask-btn:hover { background: #e53e3e; }
+    #ask-btn:disabled { background: #4a5568; cursor: not-allowed; }
+
+    .suggestions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .suggestion-chip {
+      font-size: 12px;
+      color: #718096;
+      border: 1px solid #2d3748;
+      border-radius: 16px;
+      padding: 4px 12px;
+      cursor: pointer;
+      transition: border-color .2s, color .2s;
+    }
+    .suggestion-chip:hover { border-color: #ff444f; color: #fc8181; }
+
+    /* Results area */
+    .results {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px;
+    }
+
+    .result-card {
+      background: #1a1d27;
+      border: 1px solid #2d3748;
+      border-radius: 10px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .result-card-header {
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+    .result-card-header h3 { font-size: 13px; font-weight: 600; color: #718096; }
+    .result-card-header .toggle { color: #4a5568; font-size: 12px; }
+    .result-card-body { padding: 0 16px 16px; }
+    .result-card-body.hidden { display: none; }
+
+    /* SQL display */
+    pre {
+      background: #0f1117;
+      border-radius: 6px;
+      padding: 12px;
+      font-size: 13px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      color: #90cdf4;
+      overflow-x: auto;
+      line-height: 1.5;
+    }
+
+    .explanation {
+      font-size: 13px;
+      color: #a0aec0;
+      margin-top: 8px;
+      line-height: 1.6;
+    }
+
+    /* Chart */
+    .chart-wrap {
+      position: relative;
+      height: 300px;
+      padding: 8px 0;
+    }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      background: #0f1117;
+      color: #718096;
+      font-weight: 600;
+      text-align: left;
+      padding: 8px 12px;
+      white-space: nowrap;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    td {
+      padding: 8px 12px;
+      border-top: 1px solid #2d3748;
+      color: #e2e8f0;
+      white-space: nowrap;
+    }
+    tr:hover td { background: #0f1117; }
+
+    /* State messages */
+    .state-msg {
+      text-align: center;
+      color: #4a5568;
+      font-size: 14px;
+      padding: 60px 0;
+    }
+    .state-msg .icon { font-size: 40px; margin-bottom: 12px; }
+
+    .error-msg {
+      background: #1a0a0a;
+      border: 1px solid #7f1d1d;
+      border-radius: 8px;
+      color: #fc8181;
+      font-size: 13px;
+      padding: 14px 16px;
+    }
+
+    .row-count {
+      font-size: 12px;
+      color: #4a5568;
+      margin-bottom: 10px;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #4a5568;
+      border-top-color: #ff444f;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Text-to-SQL Dashboard</h1>
+</header>
+
+<aside id="sidebar">
+  <h2>Schema</h2>
+  <div id="schema-list"><span style="color:#4a5568;font-size:12px">Loading…</span></div>
+</aside>
+
+<main>
+  <div class="query-bar">
+    <div class="query-row">
+      <input id="question" type="text" placeholder="Ask anything about your trading data…" autocomplete="off" />
+      <button id="ask-btn" onclick="runQuery()">Ask</button>
+    </div>
+    <div class="suggestions">
+      <span class="suggestion-chip" onclick="fill('Top 5 most traded symbols by volume')">Top 5 symbols by volume</span>
+      <span class="suggestion-chip" onclick="fill('Daily profit by country this year')">Daily profit by country</span>
+      <span class="suggestion-chip" onclick="fill('How many clients per account type?')">Clients per account type</span>
+      <span class="suggestion-chip" onclick="fill('Average profit per trade by asset class')">Avg profit by asset class</span>
+      <span class="suggestion-chip" onclick="fill('Total trades and profit by month')">Monthly summary</span>
+    </div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="state-msg">
+      <div class="icon">🔍</div>
+      Ask a question about your trading data to get started.
+    </div>
+  </div>
+</main>
+
+<script>
+  let chartInstance = null;
+
+  // Load schema sidebar
+  fetch('/schema').then(r => r.json()).then(tables => {
+    const el = document.getElementById('schema-list');
+    el.innerHTML = tables.map(t => `
+      <div class="table-group">
+        <div class="table-name" onclick="toggleCols(this)">${t.table}</div>
+        <div class="col-list">
+          ${t.columns.map(c => `<div class="col-item">${c.name}<span class="col-type">${c.type}</span></div>`).join('')}
+        </div>
+      </div>
+    `).join('');
+  }).catch(() => {});
+
+  function toggleCols(el) {
+    el.classList.toggle('open');
+    el.nextElementSibling.classList.toggle('open');
+  }
+
+  function fill(q) {
+    document.getElementById('question').value = q;
+    document.getElementById('question').focus();
+  }
+
+  document.getElementById('question').addEventListener('keydown', e => {
+    if (e.key === 'Enter') runQuery();
+  });
+
+  async function runQuery() {
+    const question = document.getElementById('question').value.trim();
+    if (!question) return;
+
+    const btn = document.getElementById('ask-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Thinking…';
+
+    const results = document.getElementById('results');
+    results.innerHTML = `<div class="state-msg"><span class="spinner"></span> Generating SQL and running query…</div>`;
+
+    try {
+      const res = await fetch('/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        results.innerHTML = `<div class="error-msg">⚠️ ${data.detail || 'Unknown error'}</div>`;
+        return;
+      }
+
+      renderResults(data);
+    } catch (err) {
+      results.innerHTML = `<div class="error-msg">⚠️ Network error: ${err.message}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Ask';
+    }
+  }
+
+  function renderResults(data) {
+    const results = document.getElementById('results');
+
+    // Destroy existing chart
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+
+    const showChart = data.chart && data.chart.type !== 'none' && data.rows.length > 0;
+
+    results.innerHTML = `
+      <!-- SQL Card -->
+      <div class="result-card">
+        <div class="result-card-header" onclick="toggleCard(this)">
+          <h3>Generated SQL</h3>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="result-card-body">
+          <pre id="sql-display">${escHtml(data.sql)}</pre>
+          ${data.explanation ? `<p class="explanation">💡 ${escHtml(data.explanation)}</p>` : ''}
+        </div>
+      </div>
+
+      <!-- Chart Card -->
+      ${showChart ? `
+      <div class="result-card">
+        <div class="result-card-header" onclick="toggleCard(this)">
+          <h3>Chart</h3>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="result-card-body">
+          <div class="chart-wrap"><canvas id="chart-canvas"></canvas></div>
+        </div>
+      </div>` : ''}
+
+      <!-- Table Card -->
+      <div class="result-card">
+        <div class="result-card-header" onclick="toggleCard(this)">
+          <h3>Results</h3>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="result-card-body">
+          <p class="row-count">${data.row_count} row${data.row_count !== 1 ? 's' : ''}</p>
+          ${renderTable(data.columns, data.rows)}
+        </div>
+      </div>
+    `;
+
+    if (showChart) {
+      renderChart(data);
+    }
+  }
+
+  function renderTable(columns, rows) {
+    if (!columns.length) return '<p style="color:#4a5568;font-size:13px">No results.</p>';
+    const header = columns.map(c => `<th>${escHtml(c)}</th>`).join('');
+    const body = rows.map(row =>
+      `<tr>${row.map(v => `<td>${v === null ? '<span style="color:#4a5568">NULL</span>' : escHtml(String(v))}</td>`).join('')}</tr>`
+    ).join('');
+    return `<div class="table-wrap"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+
+  function renderChart(data) {
+    const { chart, columns, rows } = data;
+    const xIdx = columns.indexOf(chart.x);
+    const yIdx = columns.indexOf(chart.y);
+    if (xIdx === -1 || yIdx === -1) return;
+
+    const labels = rows.map(r => String(r[xIdx]));
+    const values = rows.map(r => parseFloat(r[yIdx]) || 0);
+
+    const COLORS = [
+      '#ff444f','#4299e1','#48bb78','#ed8936','#9f7aea',
+      '#f687b3','#4fd1c5','#f6e05e','#fc8181','#63b3ed',
+    ];
+
+    const isMulti = ['pie', 'doughnut'].includes(chart.type);
+
+    const ctx = document.getElementById('chart-canvas').getContext('2d');
+    chartInstance = new Chart(ctx, {
+      type: chart.type,
+      data: {
+        labels,
+        datasets: [{
+          label: chart.y,
+          data: values,
+          backgroundColor: isMulti ? COLORS.slice(0, labels.length) : COLORS[0] + 'cc',
+          borderColor: isMulti ? COLORS.slice(0, labels.length) : COLORS[0],
+          borderWidth: 1,
+          tension: 0.3,
+          fill: false,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#a0aec0', font: { size: 12 } } },
+          tooltip: { callbacks: {
+            label: ctx => ` ${ctx.formattedValue}`,
+          }},
+        },
+        scales: isMulti ? {} : {
+          x: { ticks: { color: '#718096', font: { size: 11 } }, grid: { color: '#2d3748' } },
+          y: { ticks: { color: '#718096', font: { size: 11 } }, grid: { color: '#2d3748' } },
+        },
+      },
+    });
+  }
+
+  function toggleCard(header) {
+    const body = header.nextElementSibling;
+    const toggle = header.querySelector('.toggle');
+    body.classList.toggle('hidden');
+    toggle.textContent = body.classList.contains('hidden') ? '▶' : '▼';
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>
