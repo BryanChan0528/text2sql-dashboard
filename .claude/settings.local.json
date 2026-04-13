@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python seed.py)",
+      "Bash(python -c \"from schema import get_schema_string; print\\(get_schema_string\\(\\)\\)\")",
+      "Bash(python -c \"from openai import OpenAI; print\\('openai import OK'\\)\")"
+    ]
+  }
+}
