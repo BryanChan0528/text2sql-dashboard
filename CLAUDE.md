@@ -1,102 +1,65 @@
-# CLAUDE.md — Text-to-SQL Dynamic Dashboard
+# CLAUDE.md
 
-## Project Purpose
-AI-powered dashboard that lets users ask questions in plain English and see the results as tables and charts. Built to demonstrate Applied AI Engineering: vibe coding, AI-as-co-developer, end-to-end ownership.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Stack (KISS)
-- **Backend**: Python 3.11 + FastAPI + uvicorn
-- **LLM**: DeepSeek API (`deepseek-chat`) via `openai` SDK (OpenAI-compatible)
-- **Database**: SQLite (`data/deriv.db`) — file-based, zero config, ships with the app
-- **Frontend**: Single `static/index.html` — Chart.js, vanilla JS, no build step
-- **Deploy**: Render free tier (Web Service + 1GB persistent disk at `/data`)
-
-## Database Schema
-
-```sql
--- Trading activity
-CREATE TABLE trades (
-    id INTEGER PRIMARY KEY,
-    client_id INTEGER,
-    symbol TEXT,
-    side TEXT,           -- 'buy' or 'sell'
-    amount REAL,         -- stake amount in USD
-    profit REAL,         -- realized profit/loss
-    duration_seconds INTEGER,
-    timestamp TEXT       -- ISO8601
-);
-
--- Client profiles
-CREATE TABLE clients (
-    id INTEGER PRIMARY KEY,
-    country TEXT,
-    account_type TEXT,   -- 'real' or 'demo'
-    signup_date TEXT     -- ISO8601 date
-);
-
--- Tradeable instruments
-CREATE TABLE symbols (
-    symbol TEXT PRIMARY KEY,
-    asset_class TEXT,    -- 'forex', 'crypto', 'indices', 'commodities'
-    market TEXT          -- e.g. 'EURUSD', 'BTC/USD'
-);
-```
-
-## How to Run Locally
+## Commands
 
 ```bash
-# 1. Install deps
 pip install -r requirements.txt
 
-# 2. Set API key
-cp .env.example .env
-# Edit .env → add your ANTHROPIC_API_KEY
-
-# 3. Seed the database
-python seed.py
-
-# 4. Start server
-uvicorn main:app --reload
-
-# 5. Open browser
-open http://localhost:8000
+python seed.py                              # create data/deriv.db (idempotent)
+uvicorn main:app --reload                   # dev server → http://localhost:8000
+uvicorn main:app --host 0.0.0.0 --port $PORT  # production (Render)
 ```
 
-## API Endpoints
+## Environment variables
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/` | Serves dashboard HTML |
-| POST | `/query` | `{question}` → `{sql, columns, rows, chart_suggestion, explanation}` |
-| GET | `/schema` | Returns DB schema for UI sidebar |
-| GET | `/health` | Render health check → `{status: "ok"}` |
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `GROQ_API_KEY` | One of these two must be set | — | Primary LLM provider |
+| `OPENROUTER_API_KEY` | One of these two must be set | — | Fallback LLM provider |
+| `DB_PATH` | No | `data/deriv.db` | Set to `/data/deriv.db` on Render (persistent disk) |
+| `MAX_ROWS` | No | `500` | Max rows returned per `/query` call |
 
-## Text-to-SQL Prompt Pattern
+## Architecture
 
-The system uses `skills.md` skill `text_to_sql`. The prompt is assembled as:
+### Request flow
 
 ```
-[skill: text_to_sql from skills.md]
-Schema: {schema_string}
-Question: {user_question}
+POST /query {question}
+  → generate_sql()       calls call_llm() with text_to_sql skill
+  → validate_sql()       SELECT-only check + DDL/DML keyword block
+  → validate_tables()    rejects hallucinated table names against live DB
+  → sqlite execute       with PRAGMA query_only = ON
+  → suggest_chart()      calls call_llm() with chart_type skill
+  → explain_query()      calls call_llm() with explain_sql skill
 ```
 
-Claude returns a ```sql block. The app extracts the SQL, validates it (SELECT only), executes it, then calls `chart_type` skill to pick the right Chart.js type.
+All three LLM calls go through `call_llm()` in `main.py`, which iterates `LLM_PROVIDERS` and skips to the next provider on 429 or 404. Returns 503 only if every configured provider fails.
 
-## Safety Guardrails
-- Only `SELECT` statements are executed — enforced by regex before execution
-- Blocked keywords: `DROP`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `CREATE`, `TRUNCATE`
-- Max 500 rows returned
-- Query timeout: 5 seconds
+### Skills system (`skills.md` + `main.py:load_skills()`)
 
-## AI Workflow (Vibe Coding)
-This project is built with Claude Code as co-developer. When adding features:
-1. Describe the feature in plain English in the chat
-2. Reference `skills.md` for the relevant skill prompt
-3. Claude generates the code; review and test
-4. Guardrails are non-negotiable — never skip SQL validation
+Skills are parsed from `skills.md` at startup. Each `## section` becomes a key in `_skills`. The prompt is extracted with a **greedy** regex between the first and last ` ``` ` fence — this is intentional so that ` ```sql ``` ` references inside the prompt text don't truncate the extraction early.
 
-## Environment Variables
-- `DEEPSEEK_API_KEY` — required, get a key at https://platform.deepseek.com/api_keys
-- `DEEPSEEK_MODEL` — optional, defaults to `deepseek-chat`
-- `DB_PATH` — optional, defaults to `data/deriv.db` (use `/data/deriv.db` on Render)
-- `MAX_ROWS` — optional, defaults to `500`
+Placeholders use `.replace("{var}", value)` — **not** f-strings or `.format()`. Adding a new `{variable}` in a skill prompt requires a matching `.replace()` call at the use site.
+
+`debug_sql` and `summarize_results` are defined in `skills.md` but not yet wired to any endpoint.
+
+### SQL safety (three layers)
+
+1. `validate_sql()` — regex blocks `INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|ATTACH|DETACH`; query must start with `SELECT`
+2. `validate_tables()` — extracts `FROM`/`JOIN` targets via regex, rejects any not present in `sqlite_master`
+3. `PRAGMA query_only = ON` — SQLite enforces read-only at the connection level
+
+### Schema introspection (`schema.py`)
+
+- `get_schema_string()` — used in LLM prompts; includes row counts per table to help the model generate realistic queries
+- `get_schema_json()` — used by the `GET /schema` endpoint for the UI sidebar; separate from the LLM prompt
+
+### Database
+
+Three tables seeded by `seed.py`: `clients` (300 rows), `symbols` (12 rows), `trades` (2000 rows). Seed is idempotent — skips if `trades` already has rows. Connections are created per-request with `timeout=5`; no connection pool.
+
+## Deployment
+
+`render.yaml` is fully configured. On Render, set `GROQ_API_KEY` (and optionally `OPENROUTER_API_KEY`) as environment secrets. The persistent disk mounts at `/data` — `DB_PATH` must be `/data/deriv.db` in that environment.
