@@ -45,7 +45,7 @@ _skills: dict[str, str] = {}
 
 
 def load_skills():
-    skills_path = Path("skills.md")
+    skills_path = Path("prompts.md")
     if not skills_path.exists():
         return
     content = skills_path.read_text()

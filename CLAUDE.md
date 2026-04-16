@@ -37,13 +37,13 @@ POST /query {question}
 
 All three LLM calls go through `call_llm()` in `main.py`, which iterates `LLM_PROVIDERS` and skips to the next provider on 429 or 404. Returns 503 only if every configured provider fails.
 
-### Skills system (`skills.md` + `main.py:load_skills()`)
+### Prompt templates (`prompts.md` + `main.py:load_skills()`)
 
-Skills are parsed from `skills.md` at startup. Each `## section` becomes a key in `_skills`. The prompt is extracted with a **greedy** regex between the first and last ` ``` ` fence — this is intentional so that ` ```sql ``` ` references inside the prompt text don't truncate the extraction early.
+LLM prompt templates are stored in `prompts.md` and parsed at startup by `load_skills()`. Each `## section` becomes a key in `_skills`. The prompt body is extracted with a **greedy** regex between the first and last ` ``` ` fence — this is intentional so that ` ```sql ``` ` references inside the prompt text don't truncate the extraction early.
 
-Placeholders use `.replace("{var}", value)` — **not** f-strings or `.format()`. Adding a new `{variable}` in a skill prompt requires a matching `.replace()` call at the use site.
+Placeholders use `.replace("{var}", value)` — **not** f-strings or `.format()`. Adding a new `{variable}` in a prompt requires a matching `.replace()` call at the use site.
 
-`debug_sql` and `summarize_results` are defined in `skills.md` but not yet wired to any endpoint.
+`debug_sql` and `summarize_results` are defined in `prompts.md` but not yet wired to any endpoint.
 
 ### SQL safety (three layers)
 

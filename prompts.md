@@ -1,4 +1,4 @@
-# skills.md — Reusable Claude Skill Prompts
+# prompts.md — LLM Prompt Templates
 
 These are structured prompts used by `main.py` when calling the Claude API. Each skill has a **name**, **when to use it**, and the **prompt template** (use `{variable}` placeholders).
 
